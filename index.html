@@ -31,72 +31,29 @@
         <option value="">Выберите страну</option>
       </select>
       <div id="markers" aria-label="Малые страны"></div>
-      <header class="brand panel">
-        <img src="./icon.svg" width="43" height="43" alt="" />
-        <div>
-          <h1>Атлас флагов</h1>
-          <p>195 стран с озвучкой</p>
-        </div>
-      </header>
-      <div class="actions">
-        <button
-          id="sound"
-          class="panel tool"
-          aria-pressed="true"
-          aria-label="Выключить звук"
-        ></button
-        ><button
-          id="reset"
-          class="panel tool"
-          title="Вернуть исходный вид"
-          aria-label="Вернуть исходный вид"
-        ></button>
-      </div>
       <aside id="notice" class="panel" role="status" hidden></aside>
       <section id="nearby" class="panel" aria-label="Страны рядом" hidden>
         <header>
           <b>Страны рядом</b
-          ><button id="close-nearby" aria-label="Закрыть"></button>
+          ><button id="close-nearby" aria-label="Закрыть">×</button>
         </header>
         <div id="choices"></div>
       </section>
-      <div class="bottom">
-        <div id="hint" class="panel">
-          <span id="hint-icon"></span
-          ><span id="hint-text">Загружаем карту…</span>
+      <section
+        id="selection"
+        class="panel"
+        aria-label="Выбранная страна"
+        hidden
+      >
+        <img id="chosen-flag" alt="" />
+        <div class="selection-copy">
+          <span>Выбранная страна</span
+          ><strong id="chosen-name" aria-live="polite"></strong>
         </div>
-        <section
-          id="selection"
-          class="panel"
-          aria-label="Выбранная страна"
-          hidden
-        >
-          <img id="chosen-flag" alt="" />
-          <div class="selection-copy">
-            <span>Выбранная страна</span
-            ><strong id="chosen-name" aria-live="polite"></strong>
-          </div>
-          <button
-            id="repeat"
-            aria-label="Послушать ещё раз"
-            title="Послушать ещё раз"
-          ></button
-          ><button
-            id="dismiss"
-            title="Закрыть"
-            aria-label="Закрыть карточку"
-          ></button>
-        </section>
-        <div id="zoom" class="panel">
-          <button id="minus" aria-label="Отдалить" title="Отдалить"></button
-          ><output id="scale">1×</output
-          ><button
-            id="plus"
-            aria-label="Приблизить"
-            title="Приблизить"
-          ></button>
-        </div>
-      </div>
+        <button id="dismiss" title="Закрыть" aria-label="Закрыть карточку">
+          ×
+        </button>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

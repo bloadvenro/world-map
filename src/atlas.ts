@@ -56,6 +56,7 @@ export async function readAtlas() {
 const wrap = (x: number) => ((((x + 180) % 360) + 360) % 360) - 180
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n))
+const MAX_ZOOM = 4
 const oceans: [string, number, number][] = [
   ['ТИХИЙ ОКЕАН', -130, 3],
   ['АТЛАНТИЧЕСКИЙ ОКЕАН', -25, 32],
@@ -102,7 +103,7 @@ export class Atlas {
     // Cache the static flag artwork once so swiping never redraws thousands of clipped islands.
     const textureWidth = Math.min(
       4096,
-      Math.max(1440, Math.ceil(this.baseScale * 360 * ratio * 2)),
+      Math.max(1440, Math.ceil(this.baseScale * 360 * ratio * MAX_ZOOM)),
     )
     if (this.texture.width !== textureWidth) this.bake(textureWidth)
     this.constrain()
@@ -164,17 +165,12 @@ export class Atlas {
   }
   transform(from: Point, to: Point, zoom: number) {
     const anchor = this.world(from)
-    this.zoom = clamp(zoom, 1, 2)
+    this.zoom = clamp(zoom, 1, MAX_ZOOM)
     this.center = [
       anchor[0] - (to[0] - this.width / 2) / this.scale,
       anchor[1] - (to[1] - this.height / 2) / this.scale,
     ]
     this.constrain()
-    this.refresh()
-  }
-  reset() {
-    this.center = [20, 0]
-    this.zoom = 1
     this.refresh()
   }
   hit(p: Point) {

@@ -2,7 +2,9 @@ import { test, expect, type Page } from '@playwright/test'
 
 async function openMap(page: Page) {
   await page.goto('./')
-  await expect(page.locator('#hint-text')).toContainText('Коснитесь')
+  await expect(page.locator('#map')).toHaveAccessibleDescription('Масштаб 1×', {
+    timeout: 20000,
+  })
 }
 async function observeAudio(page: Page) {
   await page.addInitScript(() => {
@@ -20,25 +22,30 @@ async function observeAudio(page: Page) {
     }
   })
 }
-test('click, wheel, mute, repeat and reset on desktop', async ({ page }) => {
+test('bare map with country audio, wheel and keyboard zoom', async ({
+  page,
+}) => {
   await observeAudio(page)
   await openMap(page)
+  await expect(
+    page.locator('.brand, .actions, #hint, #zoom, #reset, #sound, #repeat'),
+  ).toHaveCount(0)
+  await expect(page.locator('#selection')).toBeHidden()
   // Brazil at 55°W, 10°S in the initial equirectangular view.
   await page.mouse.click(350, 433)
   await expect(page.locator('#chosen-name')).toHaveText('Бразилия')
   await expect(page.locator('body')).toHaveAttribute('data-playing', 'br.mp3')
-  await page.locator('#sound').click()
-  await expect(page.locator('#repeat')).toBeDisabled()
-  await page.locator('#sound').click()
-  await page.locator('#repeat').click()
   await expect(page.locator('body')).toHaveAttribute('data-ended', 'br.mp3')
   await page.mouse.move(360, 433)
-  await page.mouse.wheel(0, -600)
-  await expect(page.locator('#scale')).toHaveText('2×')
-  await expect(page.locator('#plus')).toBeDisabled()
-  await page.locator('#reset').click()
+  await page.mouse.wheel(0, -1600)
+  const map = page.locator('#map')
+  await expect(map).toHaveAccessibleDescription('Масштаб 4×')
+  await map.press('-')
+  await expect(map).toHaveAccessibleDescription('Масштаб 3,75×')
+  await page.mouse.wheel(0, 1600)
+  await expect(map).toHaveAccessibleDescription('Масштаб 1×')
+  await map.press('Escape')
   await expect(page.locator('#selection')).toBeHidden()
-  await expect(page.locator('#scale')).toHaveText('1×')
 })
 test('offline cold start and first playback of an unheard country', async ({
   page,
@@ -61,7 +68,7 @@ test('offline cold start and first playback of an unheard country', async ({
   await observeAudio(next)
   await context.setOffline(true)
   await next.goto(url)
-  await expect(next.locator('#hint-text')).toContainText('Коснитесь')
+  await expect(next.locator('#map')).toHaveAccessibleDescription('Масштаб 1×')
   const range = await next.evaluate(async () => {
     const response = await fetch('./voice/jp.mp3', {
       headers: { Range: 'bytes=10-19' },
@@ -111,15 +118,15 @@ test.describe('touch', () => {
     // After crossing 180°, central US lies near the middle of the screen.
     await page.touchscreen.tap(203, 239)
     await expect(page.locator('#chosen-name')).toHaveText('США')
-    await page.locator('#reset').tap()
+    await openMap(page)
     const fingers = (half: number) => [
-      { x: 195 - half, y: 310, id: 1 },
-      { x: 195 + half, y: 310, id: 2 },
+      { x: 195 - half, y: 232, id: 1 },
+      { x: 195 + half, y: 232, id: 2 },
     ]
     await touch('touchStart', fingers(27))
     await touch('touchMove', fingers(120))
     await touch('touchEnd', [])
-    await expect(page.locator('#scale')).toHaveText('2×')
+    await expect(page.locator('#map')).toHaveAccessibleDescription('Масштаб 4×')
     await expect(page.locator('#selection')).toBeHidden()
     const mark = page.locator('.mark[title*="Ватикан"]').first()
     await mark.tap()
@@ -130,10 +137,10 @@ test.describe('touch', () => {
     await touch('touchStart', fingers(120))
     await touch('touchMove', fingers(27))
     await touch('touchEnd', [])
-    await expect(page.locator('#scale')).toHaveText('1×')
+    await expect(page.locator('#map')).toHaveAccessibleDescription('Масштаб 1×')
     await page.setViewportSize({ width: 844, height: 390 })
     await expect(page.locator('#selection')).toBeVisible()
-    await page.locator('#reset').tap()
+    await page.locator('#dismiss').tap()
     await expect(page.locator('#chosen-flag')).toBeHidden()
   })
 })

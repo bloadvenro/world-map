@@ -5,34 +5,6 @@ import catalog from './countries.json'
 
 const byId = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T
-const glyphs = {
-  sound: '<path d="M3 9h4l5-4v14l-5-4H3zM16 8q5 4 0 8m3-11q8 7 0 14"/>',
-  silent: '<path d="M3 9h4l5-4v14l-5-4H3zM17 9l5 6m0-6-5 6"/>',
-  reset: '<path d="M3 10a9 9 0 1 1 1 7M3 4v6h6"/>',
-  repeat: '<path d="M4 9a8 8 0 1 1-1 5M4 3v6h6"/><path d="m10 9 5 3-5 3z"/>',
-  close: '<path d="m6 6 12 12M18 6 6 18"/>',
-  more: '<path d="M12 5v14M5 12h14"/>',
-  less: '<path d="M5 12h14"/>',
-  touch:
-    '<path d="M9 13V5a2 2 0 0 1 4 0v5l4 1q3 1 3 4v3l-2 3h-7l-6-7q-1-3 2-2l2 1z"/>',
-}
-function icon(id: string, k: keyof typeof glyphs) {
-  byId(id).innerHTML =
-    '<svg aria-hidden="true" viewBox="0 0 24 24">' + glyphs[k] + '</svg>'
-}
-icon('reset', 'reset')
-icon('repeat', 'repeat')
-icon('dismiss', 'close')
-icon('close-nearby', 'close')
-icon('minus', 'less')
-icon('plus', 'more')
-icon('hint-icon', 'touch')
-let sound = true
-try {
-  sound = localStorage.getItem('flag-atlas-muted') !== 'yes'
-} catch {
-  /* optional preference */
-}
 const player = new Audio()
 player.crossOrigin = 'anonymous'
 let noticeTimer = 0
@@ -43,28 +15,8 @@ function notice(message: string) {
   el.hidden = false
   noticeTimer = window.setTimeout(() => (el.hidden = true), 4400)
 }
-function soundState() {
-  icon('sound', sound ? 'sound' : 'silent')
-  const button = byId('sound')
-  button.title = sound ? 'Выключить звук' : 'Включить звук'
-  button.setAttribute('aria-label', button.title)
-  button.setAttribute('aria-pressed', String(sound))
-  byId<HTMLButtonElement>('repeat').disabled = !sound
-}
-soundState()
-byId('sound').onclick = () => {
-  sound = !sound
-  if (!sound) player.pause()
-  try {
-    localStorage.setItem('flag-atlas-muted', sound ? 'no' : 'yes')
-  } catch {
-    /* optional preference */
-  }
-  soundState()
-}
 function pronounce(code: string) {
   player.pause()
-  if (!sound) return
   player.src = './voice/' + code + '.mp3'
   void player.play().catch((err: Error) => {
     if (err.name !== 'AbortError')
@@ -78,20 +30,20 @@ async function start() {
   const canvas = byId<HTMLCanvasElement>('map')
   const markers = new Markers(byId('markers'), countries)
   const select = byId<HTMLSelectElement>('keyboard-country')
-  const hint = byId('hint')
   const nearby = byId('nearby')
   const view = new Atlas(canvas, land, borders, () => {
     markers.draw(view)
-    byId('scale').textContent =
-      Number(view.zoom.toFixed(2)).toLocaleString('ru') + '×'
-    byId<HTMLButtonElement>('minus').disabled = view.zoom <= 1
-    byId<HTMLButtonElement>('plus').disabled = view.zoom >= 2
+    canvas.setAttribute(
+      'aria-description',
+      'Масштаб ' +
+        view.zoom.toLocaleString('ru', { maximumFractionDigits: 2 }) +
+        '×',
+    )
   })
   new ResizeObserver(() => {
     view.resize()
     nearby.hidden = true
   }).observe(canvas)
-  byId('hint-text').textContent = 'Коснитесь страны, чтобы услышать её название'
   for (const entry of catalog) select.add(new Option(entry.name, entry.code))
   function choose(country: Country) {
     view.selected = country.code
@@ -99,7 +51,6 @@ async function start() {
     byId('chosen-name').textContent = country.name
     byId<HTMLImageElement>('chosen-flag').src = country.flag.src
     byId('selection').hidden = false
-    hint.hidden = true
     nearby.hidden = true
     view.refresh()
     pronounce(country.code)
@@ -108,19 +59,11 @@ async function start() {
     view.selected = ''
     select.value = ''
     byId('selection').hidden = true
-    hint.hidden = false
     nearby.hidden = true
     player.pause()
     view.refresh()
   }
   byId('dismiss').onclick = closeCard
-  byId('repeat').onclick = () => {
-    if (view.selected) pronounce(view.selected)
-  }
-  byId('reset').onclick = () => {
-    closeCard()
-    view.reset()
-  }
   byId('close-nearby').onclick = () => (nearby.hidden = true)
   select.onchange = () => {
     const c = countries.get(select.value)
@@ -229,8 +172,6 @@ async function start() {
     nearby.hidden = true
     view.transform(p, p, z)
   }
-  byId('plus').onclick = () => zoomAt(view.zoom + 0.25)
-  byId('minus').onclick = () => zoomAt(view.zoom - 0.25)
   main.addEventListener(
     'wheel',
     (e) => {
@@ -259,20 +200,24 @@ async function start() {
   }
 }
 void start().catch(() => {
-  byId('hint-text').textContent = 'Не удалось загрузить карту.'
+  const status = document.createElement('aside')
+  status.id = 'load-error'
+  status.className = 'panel'
+  status.setAttribute('role', 'alert')
+  status.textContent = 'Не удалось загрузить карту. '
   const retry = document.createElement('button')
   retry.textContent = 'Повторить'
   retry.onclick = () => location.reload()
-  byId('hint').append(retry)
+  status.append(retry)
+  byId('atlas').append(status)
 })
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   const register = async () => {
-    await navigator.serviceWorker.register('./sw.js')
-    await navigator.serviceWorker.ready
-    if (!sessionStorage.getItem('atlas-offline-notified')) {
+    const registration = await navigator.serviceWorker.register('./sw.js')
+    if (!registration.active) {
+      await navigator.serviceWorker.ready
       notice('Карта доступна без интернета')
-      sessionStorage.setItem('atlas-offline-notified', '1')
     }
   }
   window.addEventListener('load', () => {
