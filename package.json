@@ -1,0 +1,17 @@
+{
+  "name": "world-map",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/check-data.mjs && tsc --noEmit && vite build && node scripts/build-offline.mjs",
+    "preview": "vite preview",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "typescript": "~5.8.3",
+    "vite": "^6.4.0"
+  }
+}
