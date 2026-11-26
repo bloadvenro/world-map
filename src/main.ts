@@ -40,6 +40,24 @@ async function start() {
         '×',
     )
   })
+  const modes = byId('view-mode')
+  modes.hidden = false
+  modes.addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>(
+      'button',
+    )
+    if (!button) return
+    view.setGlobe(button.value === 'globe')
+    nearby.hidden = true
+    for (const choice of modes.querySelectorAll('button'))
+      choice.setAttribute('aria-pressed', String(choice === button))
+    canvas.setAttribute(
+      'aria-label',
+      view.globe
+        ? 'Глобус. Стрелки вращают Землю, плюс и минус меняют масштаб.'
+        : 'Карта мира. Стрелки перемещают карту, плюс и минус меняют масштаб.',
+    )
+  })
   new ResizeObserver(() => {
     view.resize()
     nearby.hidden = true
@@ -68,8 +86,7 @@ async function start() {
   select.onchange = () => {
     const c = countries.get(select.value)
     if (!c) return closeCard()
-    const focus = view.project(c.anchor)
-    view.pan(view.width / 2 - focus[0], view.height / 2 - focus[1])
+    view.focus(c.anchor)
     choose(c)
   }
   function openMark(key: string) {
@@ -146,7 +163,8 @@ async function start() {
     } else if (points.size === 1) {
       if (!moved && distance(p, origin) < 6) return
       moved = true
-      view.pan(p[0] - prev[0], p[1] - prev[1])
+      if (view.globe) view.transform(prev, p, view.zoom)
+      else view.pan(p[0] - prev[0], p[1] - prev[1])
     }
     points.set(e.pointerId, p)
   })

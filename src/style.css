@@ -235,3 +235,33 @@ canvas:focus-visible {
     font-size: 18px;
   }
 }
+
+#view-mode {
+  position: absolute;
+  top: var(--top);
+  right: var(--right);
+  z-index: 3;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #73858766;
+  border-radius: 24px;
+  background: #fffdf7;
+  box-shadow: 0 2px 8px #102d4226;
+}
+#view-mode button {
+  padding: 0 12px;
+  min-height: 44px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 750;
+}
+#view-mode [aria-pressed='true'] {
+  color: white;
+  background: #224859;
+}
+@media (max-width: 620px) {
+  #notice {
+    top: calc(var(--top) + 60px);
+  }
+}

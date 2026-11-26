@@ -20,11 +20,17 @@ export class Markers {
     const period = view.scale * 360
     const closeUp = view.zoom > DETAIL_ZOOM
     for (const country of this.countries.values()) {
+      if (view.globe && !closeUp) break
       if (country.markerSize * view.scale >= (closeUp ? 44 : 24)) continue
-      const [baseX, y] = view.project(country.anchor)
+      const point = view.markerPoint(country.anchor)
+      if (!point) continue
+      const [baseX, y] = point
+      if (view.globe && baseX < -22) continue
       if (y < -22 || y > view.height + 22) continue
       for (
-        let x = baseX + Math.ceil((-22 - baseX) / period) * period;
+        let x = view.globe
+          ? baseX
+          : baseX + Math.ceil((-22 - baseX) / period) * period;
         x < view.width + 22;
         x += period
       ) {
@@ -33,6 +39,7 @@ export class Markers {
         )
         if (group) group.countries.push(country)
         else groups.push({ point: [x, y], countries: [country] })
+        if (view.globe) break
       }
     }
     this.groups.clear()

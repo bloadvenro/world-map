@@ -1,7 +1,14 @@
+import {
+  GlobeRenderer,
+  anchorGlobe,
+  globeProject,
+  globeRadius,
+  globeWorld,
+} from './globe'
 import catalog from './countries.json'
 
 export type Point = [number, number]
-type Box = [number, number, number, number]
+export type Box = [number, number, number, number]
 interface SourceFeature {
   code: string | null
   anchor: Point
@@ -97,7 +104,16 @@ export class Atlas {
   height = 1
   zoom = 1
   center: Point = [20, 0]
-  selected = ''
+  globe = false
+  private sphere?: GlobeRenderer
+  private selection = ''
+  get selected() {
+    return this.selection
+  }
+  set selected(code: string) {
+    if (this.selection !== code) this.sphere?.invalidate()
+    this.selection = code
+  }
   private frame = 0
   private settleTimer?: number
   private detail?: Geometry
@@ -121,7 +137,9 @@ export class Atlas {
       : Math.min(this.width / 360, this.height / 180)
   }
   get scale() {
-    return this.baseScale * this.zoom
+    return this.globe
+      ? (globeRadius(this) * Math.PI) / 180
+      : this.baseScale * this.zoom
   }
 
   resize() {
@@ -161,7 +179,9 @@ export class Atlas {
   }
 
   private get currentGeometry() {
-    return this.zoom > DETAIL_ZOOM && this.detail && !this.gesturePreview
+    return this.zoom > DETAIL_ZOOM &&
+      this.detail &&
+      (this.globe || !this.gesturePreview)
       ? this.detail
       : this.overview
   }
@@ -197,6 +217,78 @@ export class Atlas {
     }
   }
 
+  setGlobe(enabled: boolean) {
+    this.globe = enabled
+    if (enabled) this.sphere ??= new GlobeRenderer()
+    this.constrain()
+    this.viewChanged()
+  }
+
+  focus(point: Point) {
+    this.center = [...point]
+    this.constrain()
+    this.viewChanged()
+  }
+
+  markerPoint(p: Point) {
+    return this.globe ? globeProject(this, p) : this.project(p)
+  }
+
+  private paintGlobe = (
+    ctx: CanvasRenderingContext2D,
+    bounds: Box,
+    scale: number,
+  ) => {
+    ctx.fillStyle = '#a5d6e2'
+    ctx.fillRect(
+      bounds[0],
+      bounds[1],
+      bounds[2] - bounds[0],
+      bounds[3] - bounds[1],
+    )
+    const fullWorld =
+      bounds[0] === -180 &&
+      bounds[1] === -90 &&
+      bounds[2] === 180 &&
+      bounds[3] === 90
+    const geometry =
+      !fullWorld && this.zoom > DETAIL_ZOOM && this.detail
+        ? this.detail
+        : this.overview
+    for (
+      let k = Math.floor((bounds[0] + 180) / 360);
+      k < Math.ceil((bounds[2] + 180) / 360);
+      k++
+    ) {
+      ctx.save()
+      ctx.translate(360 * k, 0)
+      const visible: Box = [
+        bounds[0] - 360 * k,
+        bounds[1],
+        bounds[2] - 360 * k,
+        bounds[3],
+      ]
+      if (fullWorld) ctx.drawImage(this.texture, -180, -90, 360, 180)
+      else this.drawLand(ctx, geometry.land, visible, scale)
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1.3 / scale
+      ctx.stroke(geometry.borders)
+      const chosen =
+        this.selected &&
+        geometry.land.find((f) => f.country?.code === this.selected)
+      if (chosen) {
+        ctx.strokeStyle = '#ffcf67'
+        ctx.lineWidth = 2.5 / scale
+        ctx.fillStyle = 'rgba(255,226,139,.22)'
+        for (const { path } of chosen.pieces) {
+          ctx.fill(path, 'evenodd')
+          ctx.stroke(path)
+        }
+      }
+      ctx.restore()
+    }
+  }
+
   project(p: Point): Point {
     return [
       this.width / 2 + wrap(p[0] - this.center[0]) * this.scale,
@@ -211,16 +303,30 @@ export class Atlas {
   }
   private constrain() {
     this.center[0] = wrap(this.center[0])
-    const limit = Math.max(0, 90 - this.height / (2 * this.scale))
+    const limit = this.globe
+      ? 90
+      : Math.max(0, 90 - this.height / (2 * this.scale))
     this.center[1] = clamp(this.center[1], -limit, limit)
   }
   pan(dx: number, dy: number) {
-    this.center[0] -= dx / this.scale
+    this.center[0] -=
+      dx /
+      (this.scale *
+        (this.globe
+          ? Math.max(0.1, Math.cos((this.center[1] * Math.PI) / 180))
+          : 1))
     this.center[1] -= dy / this.scale
     this.constrain()
     this.viewChanged()
   }
   transform(from: Point, to: Point, zoom: number) {
+    if (this.globe) {
+      const anchor = globeWorld(this, from)
+      this.zoom = clamp(zoom, 1, MAX_ZOOM)
+      if (anchor && anchorGlobe(this, anchor, to)) this.viewChanged()
+      else this.pan(to[0] - from[0], to[1] - from[1])
+      return
+    }
     const anchor = this.world(from)
     this.zoom = clamp(zoom, 1, MAX_ZOOM)
     this.center = [
@@ -231,7 +337,9 @@ export class Atlas {
     this.viewChanged()
   }
   hit(p: Point) {
-    const [lng, y] = this.world(p)
+    const point = this.globe ? globeWorld(this, p) : this.world(p)
+    if (!point) return
+    const [lng, y] = point
     const x = wrap(lng)
     this.ctx.save()
     this.ctx.resetTransform()
@@ -273,6 +381,7 @@ export class Atlas {
     this.loadingDetail = true
     try {
       this.detail = await this.loadDetail()
+      this.sphere?.invalidate()
       this.refresh()
     } catch {
       // Keep the overview usable and retry after the next gesture.
@@ -299,6 +408,15 @@ export class Atlas {
       0,
       0,
     )
+    if (this.globe && this.sphere) {
+      this.sphere.draw(
+        ctx,
+        this,
+        this.settleTimer !== undefined,
+        this.paintGlobe,
+      )
+      return
+    }
     ctx.fillStyle = '#d4e8ea'
     ctx.fillRect(0, 0, width, height)
     const [left, north] = this.world([0, 0])

@@ -87,6 +87,14 @@ test('offline cold start and first playback of an unheard country', async ({
   await next.mouse.wheel(0, -4000)
   expect((await detail).fromServiceWorker()).toBe(true)
   await expect(next.locator('#map')).toHaveAccessibleDescription('Масштаб 340×')
+  await next.reload()
+  await next.getByRole('button', { name: 'Глобус', exact: true }).click()
+  // Algeria at 3°E, 28°N on the initial, Africa-facing globe.
+  await next.mouse.click(516, 248)
+  await expect(next.locator('#chosen-name')).toHaveText('Алжир')
+  await expect(next.locator('body')).toHaveAttribute('data-ended', 'dz.mp3')
+  await next.mouse.click(20, 760)
+  await expect(next.locator('#selection')).toBeHidden()
 })
 
 test.describe('touch', () => {
@@ -94,6 +102,49 @@ test.describe('touch', () => {
     hasTouch: true,
     isMobile: true,
     viewport: { width: 390, height: 844 },
+  })
+  test('rotates the globe, pinches into a country, and carries the view back to the map', async ({
+    page,
+    context,
+  }) => {
+    await observeAudio(page)
+    await openMap(page)
+    await page.getByRole('button', { name: 'Глобус', exact: true }).tap()
+    const cdp = await context.newCDPSession(page)
+    const touch = (
+      type: 'touchStart' | 'touchMove' | 'touchEnd',
+      points: { x: number; y: number; id: number }[],
+    ) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+    await touch('touchStart', [{ x: 195, y: 422, id: 1 }])
+    await touch('touchMove', [{ x: 348, y: 422, id: 1 }])
+    await touch('touchEnd', [])
+    await expect(page.locator('#selection')).toBeHidden()
+    const pair = (half: number) => [
+      { x: 195 - half, y: 450, id: 1 },
+      { x: 195 + half, y: 450, id: 2 },
+    ]
+    for (let i = 0; i < 2; i++) {
+      await touch('touchStart', pair(6))
+      await touch('touchMove', pair(120))
+      await touch('touchEnd', [])
+    }
+    await expect(page.locator('#map')).toHaveAccessibleDescription(
+      'Масштаб 340×',
+    )
+    await page.touchscreen.tap(195, 450)
+    await expect(page.locator('#chosen-name')).toHaveText('Бразилия')
+    await expect(page.locator('body')).toHaveAttribute('data-playing', 'br.mp3')
+    await page.getByRole('button', { name: 'Карта', exact: true }).tap()
+    await page.locator('#dismiss').tap()
+    await page.touchscreen.tap(195, 422)
+    await expect(page.locator('#chosen-name')).toHaveText('Бразилия')
+    await page.getByRole('button', { name: 'Глобус', exact: true }).tap()
+    for (let i = 0; i < 2; i++) {
+      await touch('touchStart', pair(120))
+      await touch('touchMove', pair(6))
+      await touch('touchEnd', [])
+    }
+    await expect(page.locator('#map')).toHaveAccessibleDescription('Масштаб 1×')
   })
   test('renders and selects islands at regional scale and at 340×', async ({
     page,
