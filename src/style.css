@@ -250,11 +250,18 @@ canvas:focus-visible {
   box-shadow: 0 2px 8px #102d4226;
 }
 #view-mode button {
-  padding: 0 12px;
-  min-height: 44px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 750;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+#view-mode svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 #view-mode [aria-pressed='true'] {
   color: white;

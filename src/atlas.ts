@@ -219,7 +219,7 @@ export class Atlas {
 
   setGlobe(enabled: boolean) {
     this.globe = enabled
-    if (enabled) this.sphere ??= new GlobeRenderer()
+    if (enabled) this.sphere ??= new GlobeRenderer(() => this.refresh())
     this.constrain()
     this.viewChanged()
   }

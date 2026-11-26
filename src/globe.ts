@@ -1,3 +1,4 @@
+import moonUrl from './moon.webp'
 import type { Box, Point } from './atlas'
 
 const rad = Math.PI / 180
@@ -93,6 +94,16 @@ export class GlobeRenderer {
   private buffer?: ImageData
   private overview?: Raster
   private region?: Raster
+
+  private sky = document.createElement('canvas')
+  private skyWidth = 0
+  private skyHeight = 0
+  private moon = new Image()
+
+  constructor(refresh: () => void) {
+    this.moon.onload = refresh
+    this.moon.src = moonUrl
+  }
 
   invalidate() {
     this.overview = this.region = undefined
@@ -234,7 +245,7 @@ export class GlobeRenderer {
           Math.min(pixels.height - 1, Math.floor((lat - north) * sy)),
         )
         const j = (t * pixels.width + u) * 4
-        const light = 0.74 + 0.26 * z - 0.11 * x - 0.09 * y
+        const light = 0.74 + 0.26 * z + 0.11 * x - 0.09 * y
         out[i] = pixels.data[j] * light
         out[i + 1] = pixels.data[j + 1] * light
         out[i + 2] = pixels.data[j + 2] * light
@@ -251,16 +262,38 @@ export class GlobeRenderer {
     h: number,
     r: number,
   ) {
-    ctx.fillStyle = '#090f20'
-    ctx.fillRect(0, 0, w, h)
-    let seed = 4321
-    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
-    for (let i = 0; i < Math.min(420, (w * h) / 2600); i++) {
-      const x = random() * w,
-        y = random() * h
-      const size = 0.4 + random() * 1.05
-      ctx.fillStyle = 'rgba(215,233,255,' + (0.18 + random() * 0.6) + ')'
-      ctx.fillRect(x, y, size, size)
+    // Stars and the distant Sun stay fixed as the near objects grow with zoom.
+    const density = Math.min(
+      devicePixelRatio || 1,
+      2,
+      Math.sqrt(2500000 / (w * h)),
+    )
+    const width = Math.ceil(w * density),
+      height = Math.ceil(h * density)
+    if (
+      this.sky.width !== width ||
+      this.sky.height !== height ||
+      this.skyWidth !== w ||
+      this.skyHeight !== h
+    ) {
+      this.sky.width = width
+      this.sky.height = height
+      const sky = this.sky.getContext('2d')!
+      sky.setTransform(width / w, 0, 0, height / h, 0, 0)
+      this.paintSky(sky, w, h)
+      this.skyWidth = w
+      this.skyHeight = h
+    }
+    ctx.drawImage(this.sky, 0, 0, w, h)
+    if (this.moon.complete && this.moon.naturalWidth) {
+      const radius = r * 0.19
+      ctx.drawImage(
+        this.moon,
+        w / 2 - 0.93 * r - radius,
+        h / 2 + 0.84 * r - radius,
+        2 * radius,
+        2 * radius,
+      )
     }
     const halo = ctx.createRadialGradient(
       w / 2,
@@ -275,5 +308,48 @@ export class GlobeRenderer {
     halo.addColorStop(1, '#37577f00')
     ctx.fillStyle = halo
     ctx.fillRect(0, 0, w, h)
+  }
+
+  private paintSky(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    ctx.fillStyle = '#090f20'
+    ctx.fillRect(0, 0, w, h)
+    let seed = 4321
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    for (let i = 0; i < Math.min(640, (w * h) / 1850); i++) {
+      const x = random() * w,
+        y = random() * h
+      const brightness = random()
+      const radius = 0.45 + brightness * brightness * 1.05
+      ctx.fillStyle = random() < 0.2 ? '#ffe6bf' : '#dfedff'
+      ctx.globalAlpha = 0.35 + brightness * 0.65
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, 2 * Math.PI)
+      ctx.fill()
+      if (brightness > 0.965) {
+        ctx.globalAlpha = 0.55
+        ctx.beginPath()
+        ctx.moveTo(x, y - 4)
+        ctx.quadraticCurveTo(x, y, x + 3.2, y)
+        ctx.quadraticCurveTo(x, y, x, y + 4)
+        ctx.quadraticCurveTo(x, y, x - 3.2, y)
+        ctx.quadraticCurveTo(x, y, x, y - 4)
+        ctx.fill()
+      }
+    }
+    ctx.globalAlpha = 1
+    const x = w * (w > h ? 0.85 : 0.88),
+      y = Math.max(96, h * 0.17)
+    const radius = Math.max(6, Math.min(w, h) * 0.018)
+    const reach = radius * 7
+    const sun = ctx.createRadialGradient(x, y, 0, x, y, reach)
+    sun.addColorStop(0, '#fffff4')
+    sun.addColorStop(0.115, '#fff4c4')
+    sun.addColorStop(1 / 7, '#ffda86')
+    sun.addColorStop(0.15, '#ffc166b8')
+    sun.addColorStop(0.24, '#ffac484f')
+    sun.addColorStop(0.52, '#ff9a3718')
+    sun.addColorStop(1, '#ff963100')
+    ctx.fillStyle = sun
+    ctx.fillRect(x - reach, y - reach, reach * 2, reach * 2)
   }
 }
