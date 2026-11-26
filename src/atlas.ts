@@ -231,7 +231,9 @@ export class Atlas {
   }
 
   markerPoint(p: Point) {
-    return this.globe ? globeProject(this, p) : this.project(p)
+    if (!this.globe) return this.project(p)
+    const point = globeProject(this, p)
+    if (point && !this.sphere?.moonCovers(this, point)) return point
   }
 
   private paintGlobe = (
@@ -337,6 +339,7 @@ export class Atlas {
     this.viewChanged()
   }
   hit(p: Point) {
+    if (this.globe && this.sphere?.moonCovers(this, p)) return
     const point = this.globe ? globeWorld(this, p) : this.world(p)
     if (!point) return
     const [lng, y] = point

@@ -75,6 +75,78 @@ export function anchorGlobe(v: GlobeView, anchor: Point, screen: Point) {
   return true
 }
 
+// Scene coordinates at the initial Africa-facing view: right, down, towards the observer.
+type Vector = { x: number; y: number; z: number }
+const sceneMeridian = 20
+const moonPosition = { x: -0.93, y: 0.84, z: 1 }
+const sunLength = Math.hypot(0.48, -0.42, -1)
+const sunDirection = {
+  x: 0.48 / sunLength,
+  y: -0.42 / sunLength,
+  z: -1 / sunLength,
+}
+
+function cameraRotation(center: Point) {
+  const yaw = (center[0] - sceneMeridian) * rad,
+    pitch = center[1] * rad
+  const cy = Math.cos(yaw),
+    sy = Math.sin(yaw),
+    cp = Math.cos(pitch),
+    sp = Math.sin(pitch)
+  return ({ x, y, z }: Vector): Vector => {
+    const depth = x * sy + z * cy
+    return {
+      x: x * cy - z * sy,
+      y: y * cp - depth * sp,
+      z: y * sp + depth * cp,
+    }
+  }
+}
+
+function screenDisc(
+  v: GlobeView,
+  direction: Vector,
+  scale: number,
+  radius: number,
+) {
+  const x = v.width / 2 + direction.x * scale,
+    y = v.height / 2 + direction.y * scale
+  if (
+    x + radius < 0 ||
+    y + radius < 0 ||
+    x - radius > v.width ||
+    y - radius > v.height
+  )
+    return
+  return { x, y, radius, front: direction.z > 0 }
+}
+
+function moonDisc(v: GlobeView, direction: Vector) {
+  const focal = 0.9 * Math.min(v.width, v.height)
+  // As we approach the surface, the observer can pass the Moon.
+  const distance = 1 + focal / globeRadius(v) - direction.z
+  if (distance <= 0.01) return
+  const scale = focal / distance
+  return screenDisc(v, direction, scale, 0.19 * scale)
+}
+
+function makeStars() {
+  let seed = 4321
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  return Array.from({ length: 2400 }, () => {
+    const y = 2 * random() - 1,
+      azimuth = random() * 2 * Math.PI
+    const horizontal = Math.sqrt(1 - y * y)
+    return {
+      x: horizontal * Math.cos(azimuth),
+      y,
+      z: horizontal * Math.sin(azimuth),
+      brightness: random(),
+      color: random() < 0.2 ? '#ffe6bf' : '#dfedff',
+    }
+  })
+}
+
 interface Raster {
   bounds: Box
   pixels: ImageData
@@ -95,14 +167,21 @@ export class GlobeRenderer {
   private overview?: Raster
   private region?: Raster
 
-  private sky = document.createElement('canvas')
-  private skyWidth = 0
-  private skyHeight = 0
+  private stars = makeStars()
   private moon = new Image()
 
   constructor(refresh: () => void) {
     this.moon.onload = refresh
     this.moon.src = moonUrl
+  }
+
+  moonCovers(v: GlobeView, point: Point) {
+    if (!this.moon.naturalWidth) return false
+    const disc = moonDisc(v, cameraRotation(v.center)(moonPosition))
+    return (
+      !!disc?.front &&
+      Math.hypot(point[0] - disc.x, point[1] - disc.y) <= disc.radius
+    )
   }
 
   invalidate() {
@@ -190,8 +269,12 @@ export class GlobeRenderer {
     const r = globeRadius(v)
     const w = Math.min(width, 2 * r + 2),
       h = Math.min(height, 2 * r + 2)
+    const rotate = cameraRotation(v.center)
+    const sun = rotate(sunDirection)
+    const moon = moonDisc(v, rotate(moonPosition))
     if (2 * r <= Math.hypot(width, height) + 4) {
-      this.drawSpace(ctx, width, height, r)
+      this.drawSpace(ctx, v, rotate, sun, r)
+      if (moon && !moon.front) this.drawMoon(ctx, moon, sun)
     }
     // Bound the work per frame independently of the device's physical resolution.
     const ratio = Math.min(
@@ -245,7 +328,8 @@ export class GlobeRenderer {
           Math.min(pixels.height - 1, Math.floor((lat - north) * sy)),
         )
         const j = (t * pixels.width + u) * 4
-        const light = 0.74 + 0.26 * z + 0.11 * x - 0.09 * y
+        const light =
+          0.83 + 0.16 * z + 0.14 * (x * sun.x + y * sun.y + z * sun.z)
         out[i] = pixels.data[j] * light
         out[i + 1] = pixels.data[j + 1] * light
         out[i + 2] = pixels.data[j + 2] * light
@@ -254,73 +338,50 @@ export class GlobeRenderer {
     }
     this.surfaceCtx.putImageData(this.buffer, 0, 0)
     ctx.drawImage(this.surface, (width - w) / 2, (height - h) / 2, w, h)
+    if (moon?.front) this.drawMoon(ctx, moon, sun)
+  }
+
+  private drawMoon(
+    ctx: CanvasRenderingContext2D,
+    disc: NonNullable<ReturnType<typeof moonDisc>>,
+    sun: Vector,
+  ) {
+    if (!this.moon.naturalWidth) return
+    ctx.save()
+    ctx.translate(disc.x, disc.y)
+    ctx.rotate(
+      Math.atan2(sun.y, sun.x) - Math.atan2(sunDirection.y, sunDirection.x),
+    )
+    ctx.drawImage(
+      this.moon,
+      -disc.radius,
+      -disc.radius,
+      disc.radius * 2,
+      disc.radius * 2,
+    )
+    ctx.restore()
   }
 
   private drawSpace(
     ctx: CanvasRenderingContext2D,
-    w: number,
-    h: number,
+    v: GlobeView,
+    rotate: (p: Vector) => Vector,
+    sunlight: Vector,
     r: number,
   ) {
-    // Stars and the distant Sun stay fixed as the near objects grow with zoom.
-    const density = Math.min(
-      devicePixelRatio || 1,
-      2,
-      Math.sqrt(2500000 / (w * h)),
-    )
-    const width = Math.ceil(w * density),
-      height = Math.ceil(h * density)
-    if (
-      this.sky.width !== width ||
-      this.sky.height !== height ||
-      this.skyWidth !== w ||
-      this.skyHeight !== h
-    ) {
-      this.sky.width = width
-      this.sky.height = height
-      const sky = this.sky.getContext('2d')!
-      sky.setTransform(width / w, 0, 0, height / h, 0, 0)
-      this.paintSky(sky, w, h)
-      this.skyWidth = w
-      this.skyHeight = h
-    }
-    ctx.drawImage(this.sky, 0, 0, w, h)
-    if (this.moon.complete && this.moon.naturalWidth) {
-      const radius = r * 0.19
-      ctx.drawImage(
-        this.moon,
-        w / 2 - 0.93 * r - radius,
-        h / 2 + 0.84 * r - radius,
-        2 * radius,
-        2 * radius,
-      )
-    }
-    const halo = ctx.createRadialGradient(
-      w / 2,
-      h / 2,
-      Math.max(0, r - 1),
-      w / 2,
-      h / 2,
-      r + 18,
-    )
-    halo.addColorStop(0, '#91d9ff')
-    halo.addColorStop(0.16, '#6199c557')
-    halo.addColorStop(1, '#37577f00')
-    ctx.fillStyle = halo
-    ctx.fillRect(0, 0, w, h)
-  }
-
-  private paintSky(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const { width: w, height: h } = v
+    const focal = 0.9 * Math.min(w, h)
     ctx.fillStyle = '#090f20'
     ctx.fillRect(0, 0, w, h)
-    let seed = 4321
-    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647
-    for (let i = 0; i < Math.min(640, (w * h) / 1850); i++) {
-      const x = random() * w,
-        y = random() * h
-      const brightness = random()
+    for (const star of this.stars) {
+      const direction = rotate(star)
+      if (direction.z >= 0) continue
+      const position = screenDisc(v, direction, -focal / direction.z, 4)
+      if (!position) continue
+      const { x, y } = position
+      const { brightness } = star
       const radius = 0.45 + brightness * brightness * 1.05
-      ctx.fillStyle = random() < 0.2 ? '#ffe6bf' : '#dfedff'
+      ctx.fillStyle = star.color
       ctx.globalAlpha = 0.35 + brightness * 0.65
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, 2 * Math.PI)
@@ -337,9 +398,32 @@ export class GlobeRenderer {
       }
     }
     ctx.globalAlpha = 1
-    const x = w * (w > h ? 0.85 : 0.88),
-      y = Math.max(96, h * 0.17)
     const radius = Math.max(6, Math.min(w, h) * 0.018)
+    if (sunlight.z < 0) {
+      const position = screenDisc(v, sunlight, -focal / sunlight.z, radius * 7)
+      if (position) this.drawSun(ctx, position.x, position.y, radius)
+    }
+    const halo = ctx.createRadialGradient(
+      w / 2,
+      h / 2,
+      Math.max(0, r - 1),
+      w / 2,
+      h / 2,
+      r + 18,
+    )
+    halo.addColorStop(0, '#91d9ff')
+    halo.addColorStop(0.16, '#6199c557')
+    halo.addColorStop(1, '#37577f00')
+    ctx.fillStyle = halo
+    ctx.fillRect(0, 0, w, h)
+  }
+
+  private drawSun(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+  ) {
     const reach = radius * 7
     const sun = ctx.createRadialGradient(x, y, 0, x, y, reach)
     sun.addColorStop(0, '#fffff4')

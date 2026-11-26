@@ -49,6 +49,39 @@ test('bare map with country audio, wheel and keyboard zoom', async ({
   await map.press('Escape')
   await expect(page.locator('#selection')).toBeHidden()
 })
+test('dragging empty space orbits the sky and Moon and restores the same sky on return', async ({
+  page,
+}) => {
+  await openMap(page)
+  await page.getByRole('button', { name: 'Глобус', exact: true }).click()
+  const scene = () =>
+    page.locator('#map').evaluate((el: HTMLCanvasElement) => {
+      const ctx = el.getContext('2d')!
+      // The upper left contains only stars at this viewport.
+      const sky = ctx.getImageData(20, 20, 180, 120).data
+      let signature = 0
+      for (let i = 0; i < sky.length; i += 4)
+        signature = (Math.imul(signature, 31) + sky[i]) | 0
+      const red = (x: number, y: number) => ctx.getImageData(x, y, 1, 1).data[0]
+      return { stars: signature, sun: red(946, 98), moon: red(299, 672) }
+    })
+  await expect.poll(async () => (await scene()).moon).toBeGreaterThan(60)
+  const start = await scene()
+  expect(start.sun).toBeGreaterThan(220)
+  const drag = async (from: number, to: number) => {
+    await page.mouse.move(from, 80)
+    await page.mouse.down()
+    await page.mouse.move(to, 80, { steps: 4 })
+    await page.mouse.up()
+  }
+  await drag(20, 180)
+  await expect.poll(async () => (await scene()).stars).not.toEqual(start.stars)
+  expect((await scene()).sun).toBeLessThan(110)
+  expect((await scene()).moon).toBeLessThan(110)
+  await drag(180, 20)
+  await expect.poll(scene).toEqual(start)
+})
+
 test('offline cold start and first playback of an unheard country', async ({
   page,
   context,
