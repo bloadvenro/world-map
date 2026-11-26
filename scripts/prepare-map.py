@@ -25,7 +25,7 @@ def download():
         return response.read()
 
 
-def simplify(archive, directory):
+def extract_source(archive, directory):
     if hashlib.sha256(archive).hexdigest() != SHA256:
         raise ValueError("Unexpected hash for Natural Earth 5.1.1 country boundaries")
     with ZipFile(io.BytesIO(archive)) as zipped:
@@ -33,15 +33,16 @@ def simplify(archive, directory):
             name = f"{DATASET}.{ext}"
             (directory / name).write_bytes(zipped.read(name))
 
-    # Exploding first makes keep-shapes protect every separate island. Common
-    # borders still share topological arcs during the simplification.
+
+def simplify(directory, options, output):
+    # Explode first so keep-shapes protects each island at both resolutions.
     subprocess.run([
         "npx", "--yes", "--package=mapshaper@0.8.10", "--", "mapshaper",
         f"{DATASET}.shp", "-filter-fields", "ADM0_A3,ISO_A2,LABEL_X,LABEL_Y",
-        "-explode", "-simplify", "4%", "keep-shapes", "-o",
-        "precision=0.0001", "format=geojson", "countries.json",
+        "-explode", "-simplify", *options, "keep-shapes", "-o",
+        "precision=0.0001", "format=geojson", output,
     ], cwd=directory, check=True)
-    return json.loads((directory / "countries.json").read_text())["features"]
+    return json.loads((directory / output).read_text())["features"]
 
 
 def dec(value):
@@ -131,10 +132,17 @@ def main():
     if len(codes) != 195:
         raise ValueError(f"Expected 195 two-letter flag codes, found {len(codes)}")
     archive = args.archive.read_bytes() if args.archive else download()
-    with tempfile.TemporaryDirectory() as directory:
-        atlas = make_atlas(simplify(archive, Path(directory)), codes)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(atlas, separators=(",", ":")) + "\n")
+    detail_path = args.output.with_stem(args.output.stem + "-detail")
+    # Detailed layer uses a 50 m tolerance on polygons under 20,000 km².
+    detail = ["dp", "variable", "interval=$.area < 2e10 ? 50 : 700"]
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        extract_source(archive, directory)
+        for path, options in [(args.output, ["4%"]), (detail_path, detail)]:
+            features = simplify(directory, options, path.stem + ".geojson")
+            atlas = make_atlas(features, codes)
+            path.write_text(json.dumps(atlas, separators=(",", ":")) + "\n")
 
 
 if __name__ == "__main__":

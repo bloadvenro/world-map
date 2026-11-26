@@ -25,13 +25,13 @@ function pronounce(code: string) {
 }
 
 async function start() {
-  const { countries, land, borders } = await readAtlas()
+  const { countries, overview, loadDetail } = await readAtlas()
   const main = byId('atlas')
   const canvas = byId<HTMLCanvasElement>('map')
   const markers = new Markers(byId('markers'), countries)
   const select = byId<HTMLSelectElement>('keyboard-country')
   const nearby = byId('nearby')
-  const view = new Atlas(canvas, land, borders, () => {
+  const view = new Atlas(canvas, overview, loadDetail, () => {
     markers.draw(view)
     canvas.setAttribute(
       'aria-description',
@@ -152,6 +152,7 @@ async function start() {
   })
   main.addEventListener('pointerup', (e) => {
     if (!points.delete(e.pointerId)) return
+    if (!points.size) view.settle()
     const p: Point = [e.clientX, e.clientY]
     if (!moved && !points.size && distance(p, origin) < 6) {
       if (mark) openMark(mark)
@@ -163,7 +164,10 @@ async function start() {
     }
   })
   const cancel = (e: PointerEvent) => {
-    if (points.delete(e.pointerId)) moved = true
+    if (points.delete(e.pointerId)) {
+      moved = true
+      if (!points.size) view.settle()
+    }
   }
   main.addEventListener('pointercancel', cancel)
   main.addEventListener('lostpointercapture', cancel)

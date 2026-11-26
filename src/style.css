@@ -169,6 +169,17 @@ canvas:focus-visible {
   background: #ffd077;
   border-color: #15364d;
 }
+.mark.ring span {
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid #25546a;
+  background: transparent;
+  box-shadow: 0 0 0 1px #fffdf7cc;
+}
+.mark.ring.active span,
+.mark.ring:hover span {
+  box-shadow: 0 0 0 2px #ffd077;
+}
 #nearby {
   position: absolute;
   z-index: 5;

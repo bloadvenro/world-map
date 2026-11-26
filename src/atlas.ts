@@ -18,12 +18,33 @@ interface Land {
   country?: Country
   pieces: { path: Path2D; b: Box }[]
 }
-
+interface Geometry {
+  land: Land[]
+  borders: Path2D
+}
+interface Source {
+  features: SourceFeature[]
+  borders: string
+}
+async function readSource(url: string): Promise<Source> {
+  const response = await fetch(url)
+  if (!response.ok) throw Error(url + ': ' + response.status)
+  return response.json()
+}
+function compileGeometry(
+  source: Source,
+  countries: Map<string, Country>,
+): Geometry {
+  return {
+    land: source.features.map(({ code, pieces }) => ({
+      country: countries.get(code ?? ''),
+      pieces: pieces.map(({ d, b }) => ({ path: new Path2D(d), b })),
+    })),
+    borders: new Path2D(source.borders),
+  }
+}
 export async function readAtlas() {
-  const response = await fetch('./world.json')
-  if (!response.ok) throw Error('world.json: ' + response.status)
-  const { features, borders }: { features: SourceFeature[]; borders: string } =
-    await response.json()
+  const source = await readSource('./world.json')
   const flags = new Map(
     await Promise.all(
       catalog.map(async (entry) => {
@@ -35,28 +56,33 @@ export async function readAtlas() {
     ),
   )
   const countries = new Map<string, Country>()
-  const land = features.map((feature) => {
+  for (const feature of source.features) {
     const entry = flags.get(feature.code ?? '')
-    let country: Country | undefined
     if (entry) {
       const markerSize = Math.max(
         ...feature.pieces.map(({ b }) => Math.min(b[2] - b[0], b[3] - b[1])),
       )
-      country = { ...entry, anchor: feature.anchor, markerSize }
-      countries.set(country.code, country)
+      countries.set(entry.code, {
+        ...entry,
+        anchor: feature.anchor,
+        markerSize,
+      })
     }
-    return {
-      country,
-      pieces: feature.pieces.map(({ d, b }) => ({ path: new Path2D(d), b })),
-    }
-  })
-  return { countries, land, borders: new Path2D(borders) }
+  }
+  return {
+    countries,
+    overview: compileGeometry(source, countries),
+    loadDetail: async () =>
+      compileGeometry(await readSource('./world-detail.json'), countries),
+  }
 }
 
 const wrap = (x: number) => ((((x + 180) % 360) + 360) % 360) - 180
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n))
-const MAX_ZOOM = 4
+const MAX_ZOOM = 16
+export const DETAIL_ZOOM = 4
+const SETTLE_MS = 120
 const oceans: [string, number, number][] = [
   ['ТИХИЙ ОКЕАН', -130, 3],
   ['АТЛАНТИЧЕСКИЙ ОКЕАН', -25, 32],
@@ -72,13 +98,16 @@ export class Atlas {
   center: Point = [20, 0]
   selected = ''
   private frame = 0
+  private settleTimer?: number
+  private detail?: Geometry
+  private loadingDetail = false
   private ctx: CanvasRenderingContext2D
   private texture = document.createElement('canvas')
 
   constructor(
     private canvas: HTMLCanvasElement,
-    private land: Land[],
-    private borders: Path2D,
+    private overview: Geometry,
+    private loadDetail: () => Promise<Geometry>,
     private afterDraw: () => void,
   ) {
     this.ctx = canvas.getContext('2d')!
@@ -100,14 +129,14 @@ export class Atlas {
     const ratio = Math.min(devicePixelRatio || 1, 3)
     this.canvas.width = Math.round(this.width * ratio)
     this.canvas.height = Math.round(this.height * ratio)
-    // Cache the static flag artwork once so swiping never redraws thousands of clipped islands.
+    // Keep the gesture preview bounded even at maximum zoom.
     const textureWidth = Math.min(
       4096,
-      Math.max(1440, Math.ceil(this.baseScale * 360 * ratio * MAX_ZOOM)),
+      Math.max(1440, Math.ceil(this.baseScale * 360 * ratio * 2)),
     )
     if (this.texture.width !== textureWidth) this.bake(textureWidth)
     this.constrain()
-    this.refresh()
+    this.viewChanged()
   }
 
   private bake(width: number) {
@@ -122,9 +151,35 @@ export class Atlas {
       width / 2,
       this.texture.height / 2,
     )
+    this.drawLand(ctx, this.overview.land, [-180, -90, 180, 90], this.baseScale)
+  }
+
+  private get currentGeometry() {
+    return this.zoom > DETAIL_ZOOM &&
+      this.detail &&
+      this.settleTimer === undefined
+      ? this.detail
+      : this.overview
+  }
+
+  private drawLand(
+    ctx: CanvasRenderingContext2D,
+    land: Land[],
+    bounds: Box,
+    scale: number,
+  ) {
     ctx.lineJoin = 'round'
-    for (const { country, pieces } of this.land) {
+    ctx.lineWidth = 0.7 / scale
+    ctx.strokeStyle = 'rgba(30,55,65,.8)'
+    for (const { country, pieces } of land) {
       for (const { path, b } of pieces) {
+        if (
+          b[2] < bounds[0] ||
+          b[0] > bounds[2] ||
+          b[3] < bounds[1] ||
+          b[1] > bounds[3]
+        )
+          continue
         ctx.fillStyle = country ? '#faf3dc' : '#e9e8d8'
         ctx.fill(path, 'evenodd')
         if (country) {
@@ -133,8 +188,6 @@ export class Atlas {
           ctx.drawImage(country.flag, b[0], b[1], b[2] - b[0], b[3] - b[1])
           ctx.restore()
         }
-        ctx.strokeStyle = 'rgba(30,55,65,.8)'
-        ctx.lineWidth = 0.7 / this.baseScale
         ctx.stroke(path)
       }
     }
@@ -161,7 +214,7 @@ export class Atlas {
     this.center[0] -= dx / this.scale
     this.center[1] -= dy / this.scale
     this.constrain()
-    this.refresh()
+    this.viewChanged()
   }
   transform(from: Point, to: Point, zoom: number) {
     const anchor = this.world(from)
@@ -171,7 +224,7 @@ export class Atlas {
       anchor[1] - (to[1] - this.height / 2) / this.scale,
     ]
     this.constrain()
-    this.refresh()
+    this.viewChanged()
   }
   hit(p: Point) {
     const [lng, y] = this.world(p)
@@ -179,7 +232,7 @@ export class Atlas {
     this.ctx.save()
     this.ctx.resetTransform()
     try {
-      for (const { country, pieces } of this.land) {
+      for (const { country, pieces } of this.currentGeometry.land) {
         if (!country) continue
         for (const { path, b } of pieces) {
           if (
@@ -196,6 +249,34 @@ export class Atlas {
       this.ctx.restore()
     }
   }
+  private viewChanged() {
+    window.clearTimeout(this.settleTimer)
+    this.settleTimer = window.setTimeout(() => this.settle(), SETTLE_MS)
+    this.refresh()
+  }
+
+  settle() {
+    if (this.settleTimer === undefined) return
+    window.clearTimeout(this.settleTimer)
+    this.settleTimer = undefined
+    if (this.zoom > DETAIL_ZOOM && !this.detail && !this.loadingDetail) {
+      void this.refineGeometry()
+    }
+    this.refresh()
+  }
+
+  private async refineGeometry() {
+    this.loadingDetail = true
+    try {
+      this.detail = await this.loadDetail()
+      this.refresh()
+    } catch {
+      // Keep the overview usable and retry after the next gesture.
+    } finally {
+      this.loadingDetail = false
+    }
+  }
+
   refresh() {
     if (this.frame) return
     this.frame = requestAnimationFrame(() => {
@@ -216,8 +297,12 @@ export class Atlas {
     )
     ctx.fillStyle = '#d4e8ea'
     ctx.fillRect(0, 0, width, height)
-    const left = this.world([0, 0])[0]
-    const right = this.world([width, height])[0]
+    const [left, north] = this.world([0, 0])
+    const [right, south] = this.world([width, height])
+    const preview =
+      this.settleTimer !== undefined ||
+      (this.zoom === 1 &&
+        this.texture.width >= (360 * scale * this.canvas.width) / width)
     const top = this.project([0, -90])[1]
     const bottom = this.project([0, 90])[1]
     const screenX = (lng: number) => (lng - this.center[0]) * scale + width / 2
@@ -234,33 +319,44 @@ export class Atlas {
       ctx.lineTo(width, py)
     }
     ctx.stroke()
+    const { land, borders } = this.currentGeometry
     const chosen = this.selected
-      ? this.land.find((f) => f.country?.code === this.selected)
+      ? land.find((f) => f.country?.code === this.selected)
       : undefined
     for (
       let k = Math.floor((left + 180) / 360);
       k <= Math.floor((right + 180) / 360);
       k++
     ) {
-      ctx.drawImage(
-        this.texture,
-        screenX(-180 + 360 * k),
-        top,
-        360 * scale,
-        180 * scale,
-      )
+      if (preview)
+        ctx.drawImage(
+          this.texture,
+          screenX(-180 + 360 * k),
+          top,
+          360 * scale,
+          180 * scale,
+        )
       // Shared land borders stay crisp independently of the cached flag texture.
       ctx.save()
       ctx.translate(screenX(k * 360), this.project([0, 0])[1])
       ctx.scale(scale, scale)
+      if (!preview) {
+        this.drawLand(
+          ctx,
+          land,
+          [left - k * 360, north, right - k * 360, south],
+          scale,
+        )
+      }
       ctx.lineJoin = 'round'
       ctx.lineCap = 'round'
-      ctx.lineWidth = (2.3 + 0.32 * (this.zoom - 1)) / scale
+      const borderWidth = 1.4 + 0.32 * (Math.min(this.zoom, 4) - 1)
+      ctx.lineWidth = (borderWidth + 0.9) / scale
       ctx.strokeStyle = 'rgba(30,51,63,.70)'
-      ctx.stroke(this.borders)
-      ctx.lineWidth = (1.4 + 0.32 * (this.zoom - 1)) / scale
+      ctx.stroke(borders)
+      ctx.lineWidth = borderWidth / scale
       ctx.strokeStyle = '#ffffff'
-      ctx.stroke(this.borders)
+      ctx.stroke(borders)
       ctx.restore()
       if (chosen) {
         ctx.save()

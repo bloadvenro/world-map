@@ -1,4 +1,4 @@
-import type { Atlas, Country, Point } from './atlas'
+import { DETAIL_ZOOM, type Atlas, type Country, type Point } from './atlas'
 
 interface Group {
   point: Point
@@ -18,8 +18,9 @@ export class Markers {
   draw(view: Atlas) {
     const groups: Group[] = []
     const period = view.scale * 360
+    const closeUp = view.zoom > DETAIL_ZOOM
     for (const country of this.countries.values()) {
-      if (country.markerSize * view.scale >= 24) continue
+      if (country.markerSize * view.scale >= (closeUp ? 44 : 24)) continue
       const [baseX, y] = view.project(country.anchor)
       if (y < -22 || y > view.height + 22) continue
       for (
@@ -58,6 +59,7 @@ export class Markers {
       }
       button.style.left = x + 'px'
       button.style.top = y + 'px'
+      button.classList.toggle('ring', closeUp && countries.length === 1)
       button.classList.toggle(
         'active',
         countries.some((c) => c.code === view.selected),
