@@ -80,7 +80,8 @@ export async function readAtlas() {
 const wrap = (x: number) => ((((x + 180) % 360) + 360) % 360) - 180
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n))
-const MAX_ZOOM = 16
+const MAX_ZOOM = 340
+const MAX_PREVIEW_ZOOM = 16
 export const DETAIL_ZOOM = 4
 const SETTLE_MS = 120
 const oceans: [string, number, number][] = [
@@ -154,10 +155,13 @@ export class Atlas {
     this.drawLand(ctx, this.overview.land, [-180, -90, 180, 90], this.baseScale)
   }
 
+  private get gesturePreview() {
+    // Beyond this scale the overview texture can hide entire islands.
+    return this.settleTimer !== undefined && this.zoom <= MAX_PREVIEW_ZOOM
+  }
+
   private get currentGeometry() {
-    return this.zoom > DETAIL_ZOOM &&
-      this.detail &&
-      this.settleTimer === undefined
+    return this.zoom > DETAIL_ZOOM && this.detail && !this.gesturePreview
       ? this.detail
       : this.overview
   }
@@ -300,7 +304,7 @@ export class Atlas {
     const [left, north] = this.world([0, 0])
     const [right, south] = this.world([width, height])
     const preview =
-      this.settleTimer !== undefined ||
+      this.gesturePreview ||
       (this.zoom === 1 &&
         this.texture.width >= (360 * scale * this.canvas.width) / width)
     const top = this.project([0, -90])[1]

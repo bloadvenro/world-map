@@ -37,12 +37,14 @@ test('bare map with country audio, wheel and keyboard zoom', async ({
   await expect(page.locator('body')).toHaveAttribute('data-playing', 'br.mp3')
   await expect(page.locator('body')).toHaveAttribute('data-ended', 'br.mp3')
   await page.mouse.move(360, 433)
-  await page.mouse.wheel(0, -1600)
+  await page.mouse.wheel(0, -4000)
   const map = page.locator('#map')
-  await expect(map).toHaveAccessibleDescription('Масштаб 16×')
+  await expect(map).toHaveAccessibleDescription('Масштаб 340×')
   await map.press('-')
-  await expect(map).toHaveAccessibleDescription('Масштаб 15,75×')
-  await page.mouse.wheel(0, 1600)
+  await expect(map).toHaveAccessibleDescription('Масштаб 272×')
+  await map.press('+')
+  await expect(map).toHaveAccessibleDescription('Масштаб 340×')
+  await page.mouse.wheel(0, 4000)
   await expect(map).toHaveAccessibleDescription('Масштаб 1×')
   await map.press('Escape')
   await expect(page.locator('#selection')).toBeHidden()
@@ -82,9 +84,9 @@ test('offline cold start and first playback of an unheard country', async ({
   const detail = next.waitForResponse((r) =>
     r.url().endsWith('/world-detail.json'),
   )
-  await next.mouse.wheel(0, -1600)
+  await next.mouse.wheel(0, -4000)
   expect((await detail).fromServiceWorker()).toBe(true)
-  await expect(next.locator('#map')).toHaveAccessibleDescription('Масштаб 16×')
+  await expect(next.locator('#map')).toHaveAccessibleDescription('Масштаб 340×')
 })
 
 test.describe('touch', () => {
@@ -93,7 +95,7 @@ test.describe('touch', () => {
     isMobile: true,
     viewport: { width: 390, height: 844 },
   })
-  test('redraws visible island flags from SVG at 16× and keeps small islands tappable', async ({
+  test('renders and selects islands at regional scale and at 340×', async ({
     page,
   }) => {
     await page.addInitScript(() => {
@@ -125,15 +127,16 @@ test.describe('touch', () => {
     const detail = page.waitForResponse((r) =>
       r.url().endsWith('/world-detail.json'),
     )
-    await page.mouse.wheel(0, -1600)
+    await page.mouse.wheel(0, -1200)
     expect((await detail).ok()).toBe(true)
-    await expect(map).toHaveAccessibleDescription('Масштаб 16×')
+    await expect(map).toHaveAccessibleDescription('Масштаб 11,02×')
     await expect(body).toHaveAttribute('data-preview-drawn', 'yes')
-    for (const [code, name] of [
+    const islands = [
       ['fj', 'Фиджи'],
       ['tv', 'Тувалу'],
       ['mv', 'Мальдивы'],
-    ]) {
+    ]
+    for (const [code, name] of islands) {
       await page.evaluate(() => {
         document.body.dataset.lastFlags = ''
       })
@@ -150,6 +153,27 @@ test.describe('touch', () => {
         await expect(marker).toHaveClass(/ring/)
         await marker.tap()
       }
+      await expect(page.locator('#chosen-name')).toHaveText(name)
+      await page.locator('#dismiss').tap()
+    }
+    await page.mouse.move(195, 422)
+    await page.mouse.wheel(0, -4000)
+    await expect(map).toHaveAccessibleDescription('Масштаб 340×')
+    await page.evaluate(() => delete document.body.dataset.previewDrawn)
+    for (const [code, name] of islands) {
+      await page.evaluate(() => {
+        document.body.dataset.lastFlags = ''
+      })
+      await select.selectOption(code)
+      await page.locator('#dismiss').tap()
+      await map.press('ArrowRight')
+      await expect(body).toHaveAttribute(
+        'data-last-flags',
+        new RegExp(code + '\\.svg'),
+      )
+      await expect(body).not.toHaveAttribute('data-preview-drawn', 'yes')
+      // The island originally at the screen centre moved 60 px to the left.
+      await page.touchscreen.tap(135, 422)
       await expect(page.locator('#chosen-name')).toHaveText(name)
       await page.locator('#dismiss').tap()
     }
@@ -194,15 +218,35 @@ test.describe('touch', () => {
     await touch('touchMove', fingers(120))
     await touch('touchEnd', [])
     await expect(page.locator('#map')).toHaveAccessibleDescription(
-      'Масштаб 16×',
+      'Масштаб 20×',
     )
     await expect(page.locator('#selection')).toBeHidden()
     const mark = page.locator('.mark[title*="Ватикан"]').first()
+    const box = await mark.boundingBox()
+    expect(box).toBeTruthy()
+    const x = box!.x + box!.width / 2
+    const y = box!.y + box!.height / 2
+    const aroundMarker = (half: number) => [
+      { x, y: y - half, id: 1 },
+      { x, y: y + half, id: 2 },
+    ]
+    await touch('touchStart', aroundMarker(6))
+    await touch('touchMove', aroundMarker(120))
+    await touch('touchEnd', [])
+    await expect(page.locator('#map')).toHaveAccessibleDescription(
+      'Масштаб 340×',
+    )
+    const zoomedBox = await mark.boundingBox()
+    expect(Math.abs(zoomedBox!.x - box!.x)).toBeLessThan(3)
+    expect(Math.abs(zoomedBox!.y - box!.y)).toBeLessThan(3)
     await mark.tap()
     if (await page.locator('#nearby').isVisible())
       await page.locator('#choices button').filter({ hasText: 'Ватикан' }).tap()
     await expect(page.locator('#chosen-name')).toHaveText('Ватикан')
     await expect(page.locator('body')).toHaveAttribute('data-playing', 'va.mp3')
+    await touch('touchStart', fingers(120))
+    await touch('touchMove', fingers(6))
+    await touch('touchEnd', [])
     await touch('touchStart', fingers(120))
     await touch('touchMove', fingers(6))
     await touch('touchEnd', [])

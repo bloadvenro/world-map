@@ -196,8 +196,12 @@ async function start() {
       ArrowDown: [0, -60],
     }
     if (arrows[e.key]) view.pan(...arrows[e.key])
-    else if (['+', '='].includes(e.key)) zoomAt(view.zoom + 0.25)
-    else if (e.key === '-') zoomAt(view.zoom - 0.25)
+    else if (['+', '='].includes(e.key))
+      zoomAt(view.zoom < 16 ? view.zoom + 0.25 : view.zoom * 1.25)
+    else if (e.key === '-')
+      zoomAt(
+        view.zoom <= 16 ? view.zoom - 0.25 : Math.max(16, view.zoom / 1.25),
+      )
     else if (e.key === 'Escape') closeCard()
     else return
     e.preventDefault()
