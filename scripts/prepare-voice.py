@@ -1,9 +1,10 @@
-"""Render the Russian country names offline. Requires PyTorch and ffmpeg.
+"""Render Russian country names or population recordings offline. Requires PyTorch and ffmpeg.
 
 Pass the local Silero v5_cis_base_nostress.pt model as the first argument.
 The website uses the finished MP3s and does not need the synthesis model.
 """
 import argparse
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -32,6 +33,16 @@ def spoken_names():
     return names
 
 
+def population_phrases():
+    with (ROOT / "scripts/population-2026.tsv").open(encoding="utf-8") as source:
+        rows = list(csv.DictReader(source, delimiter="\t"))
+    phrases = {r["code"]: "Насел+ение — прим+ерно " + r["spoken_number"] + " челов+ек"
+               for r in rows}
+    if len(phrases) != len(rows) or set(phrases) != set(spoken_names()):
+        raise ValueError("Population data must match every country exactly once")
+    return phrases
+
+
 def render(model, text, target):
     ssml = '<speak><prosody rate="slow">' + escape(text) + '.</prosody></speak>'
     samples = model.apply_tts(ssml_text=ssml, speaker=SPEAKER, sample_rate=RATE,
@@ -49,21 +60,26 @@ def render(model, text, target):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model", type=Path)
+    parser.add_argument("--population", action="store_true",
+                        help="Render the population figures instead of country names")
     args = parser.parse_args()
     with args.model.open("rb") as model_file:
         if hashlib.file_digest(model_file, "sha256").hexdigest() != MODEL_SHA256:
             parser.error("Model checksum differs from the verified voice model")
-    names = spoken_names()
+    phrases = population_phrases() if args.population else spoken_names()
     torch.manual_seed(42)
     torch.set_num_threads(3)
     model = torch.package.PackageImporter(str(args.model)).load_pickle("tts_models", "model")
-    dest = ROOT / "public/voice"
+    dest = ROOT / "public" / ("population" if args.population else "voice")
     with tempfile.TemporaryDirectory(dir=ROOT) as work:
-        for code, text in names.items():
+        for i, (code, text) in enumerate(phrases.items(), start=1):
             render(model, text, Path(work) / f"{code}.mp3")
-        for code in names:
+            if i % 25 == 0:
+                print(f"Rendered {i}/{len(phrases)}", flush=True)
+        dest.mkdir(exist_ok=True)
+        for code in phrases:
             (Path(work) / f"{code}.mp3").replace(dest / f"{code}.mp3")
-    print(f"Rendered {len(names)} Russian country names.")
+    print(f"Saved {len(phrases)} recordings to {dest}")
 
 
 if __name__ == "__main__":

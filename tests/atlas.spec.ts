@@ -12,11 +12,21 @@ async function observeAudio(page: Page) {
     window.Audio = class extends AudioElement {
       constructor(src?: string) {
         super(src)
+        const track = () => this.currentSrc.split('/').slice(-2).join('/')
         this.addEventListener('playing', () => {
-          document.body.dataset.playing = this.currentSrc.split('/').pop()
+          document.body.dataset.playing = track()
+          document.body.dataset.sequence = [
+            document.body.dataset.sequence,
+            track(),
+          ]
+            .filter(Boolean)
+            .join(' ')
+        })
+        this.addEventListener('pause', () => {
+          document.body.dataset.paused = track()
         })
         this.addEventListener('ended', () => {
-          document.body.dataset.ended = this.currentSrc.split('/').pop()
+          document.body.dataset.ended = track()
         })
       }
     }
@@ -34,8 +44,14 @@ test('bare map with country audio, wheel and keyboard zoom', async ({
   // Brazil at 55°W, 10°S in the initial equirectangular view.
   await page.mouse.click(350, 433)
   await expect(page.locator('#chosen-name')).toHaveText('Бразилия')
-  await expect(page.locator('body')).toHaveAttribute('data-playing', 'br.mp3')
-  await expect(page.locator('body')).toHaveAttribute('data-ended', 'br.mp3')
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-playing',
+    'voice/br.mp3',
+  )
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-ended',
+    'voice/br.mp3',
+  )
   await page.mouse.move(360, 433)
   await page.mouse.wheel(0, -4000)
   const map = page.locator('#map')
@@ -49,6 +65,27 @@ test('bare map with country audio, wheel and keyboard zoom', async ({
   await map.press('Escape')
   await expect(page.locator('#selection')).toBeHidden()
 })
+test('switching countries interrupts either track and closing stops playback', async ({
+  page,
+}) => {
+  await observeAudio(page)
+  await openMap(page)
+  const body = page.locator('body')
+  const select = page.locator('#keyboard-country')
+  await select.selectOption('br')
+  await expect(body).toHaveAttribute('data-playing', 'voice/br.mp3')
+  await select.selectOption('ru')
+  await expect(body).toHaveAttribute('data-playing', 'population/ru.mp3')
+  await select.selectOption('jp')
+  await expect(body).toHaveAttribute('data-playing', 'voice/jp.mp3')
+  await page.locator('#dismiss').click()
+  await expect(body).toHaveAttribute('data-paused', 'voice/jp.mp3')
+  await expect(body).toHaveAttribute(
+    'data-sequence',
+    'voice/br.mp3 voice/ru.mp3 population/ru.mp3 voice/jp.mp3',
+  )
+})
+
 test('dragging empty space orbits the sky and Moon and restores the same sky on return', async ({
   page,
 }) => {
@@ -89,14 +126,20 @@ test('offline cold start and first playback of an unheard country', async ({
   await observeAudio(page)
   await openMap(page)
   await page.waitForFunction(() => !!navigator.serviceWorker.controller)
-  const cacheCount = await page.evaluate(async () => {
+  const cacheCounts = await page.evaluate(async () => {
     const keys = await caches.keys()
     const cache = await caches.open(
       keys.find((k) => k.startsWith('flag-atlas:'))!,
     )
-    return (await cache.keys()).filter((k) => k.url.endsWith('.mp3')).length
+    const urls = (await cache.keys()).map((k) => new URL(k.url).pathname)
+    return ['voice', 'population'].map(
+      (dir) =>
+        urls.filter(
+          (url) => url.includes('/' + dir + '/') && url.endsWith('.mp3'),
+        ).length,
+    )
   })
-  expect(cacheCount).toBe(195)
+  expect(cacheCounts).toEqual([195, 195])
   const next = await context.newPage()
   const url = page.url()
   await page.close()
@@ -113,7 +156,15 @@ test('offline cold start and first playback of an unheard country', async ({
   expect(range).toEqual([206, 10])
   await next.mouse.click(350, 433)
   await expect(next.locator('#chosen-flag')).toHaveAttribute('src', /br\.svg$/)
-  await expect(next.locator('body')).toHaveAttribute('data-ended', 'br.mp3')
+  await expect(next.locator('body')).toHaveAttribute(
+    'data-ended',
+    'population/br.mp3',
+    { timeout: 15000 },
+  )
+  await expect(next.locator('body')).toHaveAttribute(
+    'data-sequence',
+    'voice/br.mp3 population/br.mp3',
+  )
   const detail = next.waitForResponse((r) =>
     r.url().endsWith('/world-detail.json'),
   )
@@ -125,7 +176,15 @@ test('offline cold start and first playback of an unheard country', async ({
   // Algeria at 3°E, 28°N on the initial, Africa-facing globe.
   await next.mouse.click(516, 248)
   await expect(next.locator('#chosen-name')).toHaveText('Алжир')
-  await expect(next.locator('body')).toHaveAttribute('data-ended', 'dz.mp3')
+  await expect(next.locator('body')).toHaveAttribute(
+    'data-ended',
+    'population/dz.mp3',
+    { timeout: 15000 },
+  )
+  await expect(next.locator('body')).toHaveAttribute(
+    'data-sequence',
+    'voice/dz.mp3 population/dz.mp3',
+  )
   await next.mouse.click(20, 760)
   await expect(next.locator('#selection')).toBeHidden()
 })
@@ -166,7 +225,10 @@ test.describe('touch', () => {
     )
     await page.touchscreen.tap(195, 450)
     await expect(page.locator('#chosen-name')).toHaveText('Бразилия')
-    await expect(page.locator('body')).toHaveAttribute('data-playing', 'br.mp3')
+    await expect(page.locator('body')).toHaveAttribute(
+      'data-playing',
+      'voice/br.mp3',
+    )
     await page.getByRole('button', { name: 'Карта', exact: true }).tap()
     await page.locator('#dismiss').tap()
     await page.touchscreen.tap(195, 422)
@@ -286,7 +348,10 @@ test.describe('touch', () => {
     // Camera now near 139°E. Tap central Honshu.
     await page.touchscreen.tap(192, 253)
     await expect(page.locator('#chosen-name')).toHaveText('Япония')
-    await expect(page.locator('body')).toHaveAttribute('data-playing', 'jp.mp3')
+    await expect(page.locator('body')).toHaveAttribute(
+      'data-playing',
+      'voice/jp.mp3',
+    )
     await page.locator('#dismiss').tap()
     await swipe(335, 55)
     await swipe(335, 55)
@@ -327,7 +392,10 @@ test.describe('touch', () => {
     if (await page.locator('#nearby').isVisible())
       await page.locator('#choices button').filter({ hasText: 'Ватикан' }).tap()
     await expect(page.locator('#chosen-name')).toHaveText('Ватикан')
-    await expect(page.locator('body')).toHaveAttribute('data-playing', 'va.mp3')
+    await expect(page.locator('body')).toHaveAttribute(
+      'data-playing',
+      'voice/va.mp3',
+    )
     await touch('touchStart', fingers(120))
     await touch('touchMove', fingers(6))
     await touch('touchEnd', [])

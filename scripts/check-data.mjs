@@ -31,6 +31,7 @@ for (const file of ['world.json', 'world-detail.json']) {
 for (const [directory, extension] of [
   ['flags', 'svg'],
   ['voice', 'mp3'],
+  ['population', 'mp3'],
 ]) {
   const names = await readdir('public/' + directory)
   assert.deepEqual(

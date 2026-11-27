@@ -15,13 +15,29 @@ function notice(message: string) {
   el.hidden = false
   noticeTimer = window.setTimeout(() => (el.hidden = true), 4400)
 }
-function pronounce(code: string) {
+let speechId = 0
+function stopSpeech() {
+  speechId++
+  player.onended = null
   player.pause()
-  player.src = './voice/' + code + '.mp3'
-  void player.play().catch((err: Error) => {
-    if (err.name !== 'AbortError')
-      notice('Запись не воспроизвелась. Можно попробовать ещё раз.')
-  })
+}
+
+function pronounce(code: string) {
+  stopSpeech()
+  const id = speechId
+  function play(directory: 'voice' | 'population') {
+    player.src = './' + directory + '/' + code + '.mp3'
+    void player.play().catch((err: Error) => {
+      if (id === speechId && err.name !== 'AbortError')
+        notice('Запись не воспроизвелась. Можно попробовать ещё раз.')
+    })
+  }
+  player.onended = () => {
+    if (id !== speechId || !player.ended || player.error) return
+    player.onended = null
+    play('population')
+  }
+  play('voice')
 }
 
 async function start() {
@@ -78,7 +94,7 @@ async function start() {
     select.value = ''
     byId('selection').hidden = true
     nearby.hidden = true
-    player.pause()
+    stopSpeech()
     view.refresh()
   }
   byId('dismiss').onclick = closeCard

@@ -1,0 +1,12 @@
+United Nations, Department of Economic and Social Affairs, Population Division
+(2024). World Population Prospects 2024, Online Edition.
+https://population.un.org/wpp/
+Creative Commons Attribution 3.0 IGO
+https://creativecommons.org/licenses/by/3.0/igo/
+
+Indicator: Total Population as of 1 July (TPopulation1July), medium variant, 2026.
+Source values in thousands were multiplied by 1,000 to obtain persons.
+The January 2026 interim revision was applied to Togo.
+The atlas selects its 195 countries, rounds the projections and narrates them in Russian.
+https://population.un.org/wpp/assets/Excel%20Files/1_Indicator%20(Standard)/CSV_FILES/WPP2024_Demographic_Indicators_Medium.csv.gz
+https://population.un.org/wpp/assets/Excel%20Files/1_Indicator%20(Standard)/WPP2024_CSV_files_update.zip
